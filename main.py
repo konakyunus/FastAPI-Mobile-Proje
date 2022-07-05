@@ -1,8 +1,8 @@
-from sqlalchemy.orm import Session
-import crud, models, schemas
-from config import SessionLocal, engine
+import sqlalchemy.orm as _orm
+import fastapi as _fastapi
+import services as _services, schemas as _schemas
+from config import SessionLocal
 from router import router
-from config import engine
 from datetime import datetime, timedelta
 from typing import List, Union
 from fastapi import Depends, FastAPI, HTTPException, Security, status
@@ -16,23 +16,11 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, ValidationError
 
 
-fake_users = {
-    "johndoe": {
-        "username": "johndoe",
-        "full_name": "John Doe",
-        "email": "johndoe@example.com",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        "disabled": False,
-    }
-}
-
-models.Base.metadata.create_all(bind=engine)
-
 app = FastAPI()
 
 app.include_router(router, prefix="/book", tags=["book"])
 
-
+_services.create_database()
 
 # Dependency
 def get_db():
@@ -47,17 +35,6 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 
-fake_users_db = {
-    "yunus": {
-        "username": "yunus",
-        "full_name": "yunus",
-        "email": "yunus@example.com",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        "disabled": False,
-    },
-}
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -69,14 +46,16 @@ class TokenData(BaseModel):
 
 
 class User(BaseModel):
+    id: int
     username: str
     email: Union[str, None] = None
     full_name: Union[str, None] = None
     disabled: Union[bool, None] = None
 
 
-class UserInDB(User):
-    hashed_password: str
+class DataUser(BaseModel):
+    username: str
+    password: Union[str, None] = None
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -97,19 +76,18 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
-def get_user(db, username: str):
-    if username in db:
-        user_dict = db[username]
-        return UserInDB(**user_dict)
+def get_user(username2: str, username: str):
+    if username == username2:
+       return username
+    return False
 
 
-def authenticate_user(fake_db, username: str, password: str):
-    user = get_user(fake_db, username)
-    if not user:
-        return False
-    if not verify_password(password, user.hashed_password):
-        return False
-    return user
+def authenticate_user(username2: str, password2: str, username: str, password: str):
+            if username2 != username:
+                return False
+            if password2 != password:
+                return False
+            return True
 
 
 def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None):
@@ -124,72 +102,62 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
 
 
 async def get_current_user(
-    security_scopes: SecurityScopes, token: str = Depends(oauth2_scheme)
+        token: str = Depends(oauth2_scheme),
+        db: _orm.Session = _fastapi.Depends(_services.get_db)
 ):
-    if security_scopes.scopes:
-        authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
-    else:
-        authenticate_value = f"Bearer"
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": authenticate_value},
+        headers={"WWW-Authenticate": "Bearer"},
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
+        db_user: DataUser = _services.get_user_by_username(db=db, username=username)
         if username is None:
             raise credentials_exception
-        token_scopes = payload.get("scopes", [])
-        token_data = TokenData(scopes=token_scopes, username=username)
-    except (JWTError, ValidationError):
+        token_data = TokenData(username=username)
+    except JWTError:
         raise credentials_exception
-    user = get_user(fake_users_db, username=token_data.username)
+    user = get_user(db_user.username, username=token_data.username)
     if user is None:
         raise credentials_exception
-    for scope in security_scopes.scopes:
-        if scope not in token_data.scopes:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not enough permissions",
-                headers={"WWW-Authenticate": authenticate_value},
-            )
     return user
 
 
-async def get_current_active_user(
-    current_user: User = Security(get_current_user, scopes=["me"])
-):
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
 
+""""" Kullanıcı Kaydı Oluşturma
+@app.post("/users/", response_model=_schemas.User)
+def create_user(
+    user: _schemas.UserCreate, db: _orm.Session = _fastapi.Depends(_services.get_db)
+):
+    db_user = _services.get_user_by_email(db=db, email=user.email)
+    if db_user:
+        raise _fastapi.HTTPException(
+            status_code=400, detail="woops the email is in use"
+        )
+    return _services.create_user(db=db, user=user)
+
+"""
 
 @app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username, "scopes": form_data.scopes},
-        expires_delta=access_token_expires,
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
-
-@app.get("/users/me/", response_model=User)
-async def read_users_me(current_user: User = Depends(get_current_active_user)):
-    return current_user
-
-
-@app.get("/users/me/items/")
-async def read_own_items(
-    current_user: User = Security(get_current_active_user, scopes=["items"])
-):
-    return [{"item_id": "Foo", "owner": current_user.username}]
+async def login_for_access_token(
+        form_data: OAuth2PasswordRequestForm = Depends(),
+        db: _orm.Session = _fastapi.Depends(_services.get_db)):
+        db_user: DataUser = _services.get_user_by_username(db=db, username=form_data.username)
+        user2 = authenticate_user(db_user.username, db_user.password, form_data.username, form_data.password)
+        if user2 == True :
+             access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+             access_token = create_access_token(
+             data={"sub": db_user.username}, expires_delta=access_token_expires
+        )
+        return {"access_token": access_token, "token_type": "bearer"}
 
 
 @app.get("/status/")

@@ -1,63 +1,45 @@
-from typing import List, Optional, Generic, TypeVar, Union
-from pydantic import BaseModel , Field
-from pydantic.generics import GenericModel
-
-T = TypeVar('T')
+from typing import List
+import datetime as _dt
+import pydantic as _pydantic
 
 
-class BookSchema(BaseModel):
-    id: Optional[int] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-
-    class Config:
-        orm_mode = True
-
-
-class Request(GenericModel, Generic[T]):
-    parameter: Optional[T] = Field(...)
-
-
-class RequestBook(BaseModel):
-    parameter: BookSchema = Field(...)
-
-
-class Response(GenericModel, Generic[T]):
-    code: str
-    status: str
-    message: str
-    result: Optional[T]
-
-
-class ItemBase(BaseModel):
+class _PostBase(_pydantic.BaseModel):
     title: str
-    description: Union[str, None] = None
+    content: str
 
 
-class ItemCreate(ItemBase):
+class PostCreate(_PostBase):
     pass
 
 
-class Item(ItemBase):
+class Post(_PostBase):
     id: int
     owner_id: int
+    date_created: _dt.datetime
+    date_last_updated: _dt.datetime
 
     class Config:
         orm_mode = True
 
 
-class UserBase(BaseModel):
+class _UserBase(_pydantic.BaseModel):
+    username: str
     email: str
-
-
-class UserCreate(UserBase):
     password: str
 
 
-class User(UserBase):
-    id: int
-    is_active: bool
-    items: List[Item] = []
+class UserCreate(_UserBase):
+    username: str
+    email: str
+    password: str
 
-    class Config:
+
+
+class Config:
         orm_mode = True
+
+
+
+
+
+
