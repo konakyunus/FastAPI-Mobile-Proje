@@ -1,45 +1,26 @@
-from typing import List
-import datetime as _dt
-import pydantic as _pydantic
+from typing import List, Union
+
+from pydantic import BaseModel
 
 
-class _PostBase(_pydantic.BaseModel):
-    title: str
-    content: str
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 
-class PostCreate(_PostBase):
-    pass
+class TokenData(BaseModel):
+    username: Union[str, None] = None
+    scopes: List[str] = []
 
 
-class Post(_PostBase):
+class User(BaseModel):
     id: int
-    owner_id: int
-    date_created: _dt.datetime
-    date_last_updated: _dt.datetime
-
-    class Config:
-        orm_mode = True
-
-
-class _UserBase(_pydantic.BaseModel):
     username: str
-    email: str
-    password: str
+    email: Union[str, None] = None
+    full_name: Union[str, None] = None
+    disabled: Union[bool, None] = None
 
 
-class UserCreate(_UserBase):
+class DataUser(BaseModel):
     username: str
-    email: str
-    password: str
-
-
-
-class Config:
-        orm_mode = True
-
-
-
-
-
-
+    password: Union[str, None] = None
